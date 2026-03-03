@@ -751,41 +751,33 @@ export default function GameBoard() {
                 </button>
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleLogin}>
-                <div>
-                  <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wider mb-2">
-                    Tài Khoản
-                  </label>
-                  <Input
-                    classNames={{
-                      inputWrapper:
-                        "bg-[#F1F5F9] border-[#CBD5E1] shadow-inner",
-                    }}
-                    placeholder="..."
-                    size="lg"
-                    value={authForm.username}
-                    onChange={(e) =>
-                      setAuthForm({ ...authForm, username: e.target.value })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wider mb-2">
-                    Mật Khẩu
-                  </label>
-                  <Input
-                    classNames={{
-                      inputWrapper:
-                        "bg-[#F1F5F9] border-[#CBD5E1] shadow-inner",
-                    }}
-                    placeholder="..."
-                    size="lg"
-                    type="password"
-                    value={authForm.password}
-                    onChange={(e) =>
-                      setAuthForm({ ...authForm, password: e.target.value })
-                    }
-                  />
-                </div>
+                <Input
+                  classNames={{
+                    inputWrapper: "bg-[#F1F5F9] border-[#CBD5E1] shadow-inner",
+                  }}
+                  label="Tài Khoản"
+                  labelPlacement="outside"
+                  placeholder="..."
+                  size="lg"
+                  value={authForm.username}
+                  onChange={(e) =>
+                    setAuthForm({ ...authForm, username: e.target.value })
+                  }
+                />
+                <Input
+                  classNames={{
+                    inputWrapper: "bg-[#F1F5F9] border-[#CBD5E1] shadow-inner",
+                  }}
+                  label="Mật Khẩu"
+                  labelPlacement="outside"
+                  placeholder="..."
+                  size="lg"
+                  type="password"
+                  value={authForm.password}
+                  onChange={(e) =>
+                    setAuthForm({ ...authForm, password: e.target.value })
+                  }
+                />
                 {authError && (
                   <p className="text-[#EF4444] text-sm font-medium text-center">
                     {authError}
