@@ -17,6 +17,8 @@ import {
 
 import { GAME_DATA } from "@/lib/game-data";
 
+import { supabase, GAME_CHANNEL } from "@/lib/supabase";
+
 export default function GameBoard() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -36,7 +38,6 @@ export default function GameBoard() {
   const [teamAnswerStatus, setTeamAnswerStatus] = useState<
     "idle" | "correct" | "incorrect"
   >("idle");
-  const [showRound2Transition, setShowRound2Transition] = useState(false);
   const [userDismissedRow, setUserDismissedRow] = useState<number | null>(null);
 
   // Sync to server
@@ -53,66 +54,75 @@ export default function GameBoard() {
     } catch {}
   };
 
-  // Poll state from server if not admin
+  // Real-time synchronization via Supabase Broadcast
   useEffect(() => {
-    let isActive = true;
-    let failCount = 0;
     let lastSeenVersion = 0;
 
-    const fetchState = async (isPolling: boolean = false) => {
-      if (!isActive) return;
-
+    // Initial fetch to get the current state
+    const fetchInitialState = async () => {
       try {
-        const url = isPolling ? "/api/game?poll=true" : "/api/game";
-        const res = await fetch(url);
-
-        if (!isActive) return;
-
-        // Reset fail count on success
-        failCount = 0;
-
-        if (res.status === 204) {
-          // Empty or abort
-          fetchState(true);
-          return;
-        }
-
+        const res = await fetch("/api/game");
         const data = await res.json();
-
-        if (!isActive) return;
-
-        // Handle game state update
-        // Only update if server has a NEWER version than what we've seen
-        if (data && !data.timeout && !isAdmin) {
-          const serverVersion = data.version || 0;
-
-          if (serverVersion > lastSeenVersion) {
-            lastSeenVersion = serverVersion;
-
-            // ONLY sync the crossword grid state (revealed rows and vertical word)
-            if (data.revealedRows !== undefined)
-              setRevealedRows(data.revealedRows);
-            if (data.verticalRevealed !== undefined)
-              setVerticalRevealed(data.verticalRevealed);
+        
+        if (data && data.version > lastSeenVersion) {
+          lastSeenVersion = data.version;
+          if (!isAdmin) {
+            if (data.revealedRows !== undefined) setRevealedRows(data.revealedRows);
+            if (data.verticalRevealed !== undefined) setVerticalRevealed(data.verticalRevealed);
+            
+            // Sync question/active row states
+            if (data.activeRow !== undefined) {
+              setActiveRow((prev) => {
+                if (data.activeRow !== prev) setUserDismissedRow(null);
+                return data.activeRow;
+              });
+            }
+            if (data.timerActive !== undefined) setTimerActive(data.timerActive);
+            if (data.timerEndsAt !== undefined) setTimerEndsAt(data.timerEndsAt);
+            if (data.timeLeft !== undefined && !data.timerActive) setTimeLeft(data.timeLeft);
+            if (data.teamAnswer !== undefined) setTeamAnswer(data.teamAnswer);
+            if (data.teamAnswerStatus !== undefined) setTeamAnswerStatus(data.teamAnswerStatus);
           }
         }
-
-        // Keep polling
-        fetchState(true);
-      } catch (_err) {
-        if (isActive) {
-          failCount++;
-          // Wait longer between retries if failing repeatedly
-          const retryDelay = Math.min(1000 * failCount, 5000);
-          setTimeout(() => fetchState(true), retryDelay);
-        }
-      }
+      } catch {}
     };
 
-    fetchState(false);
+    fetchInitialState();
+
+    // Listen for broadcasted updates
+    const channel = supabase.channel(GAME_CHANNEL);
+    
+    channel
+      .on("broadcast", { event: "game-update" }, ({ payload }) => {
+        if (!payload) return;
+        
+        const serverVersion = payload.version || 0;
+        if (serverVersion > lastSeenVersion) {
+          lastSeenVersion = serverVersion;
+          
+          if (!isAdmin) {
+            // Sync crossword grid and question state
+            if (payload.revealedRows !== undefined) setRevealedRows(payload.revealedRows);
+            if (payload.verticalRevealed !== undefined) setVerticalRevealed(payload.verticalRevealed);
+            
+            if (payload.activeRow !== undefined) {
+              setActiveRow((prev) => {
+                if (payload.activeRow !== prev) setUserDismissedRow(null);
+                return payload.activeRow;
+              });
+            }
+            if (payload.timerActive !== undefined) setTimerActive(payload.timerActive);
+            if (payload.timerEndsAt !== undefined) setTimerEndsAt(payload.timerEndsAt);
+            if (payload.timeLeft !== undefined && !payload.timerActive) setTimeLeft(payload.timeLeft);
+            if (payload.teamAnswer !== undefined) setTeamAnswer(payload.teamAnswer);
+            if (payload.teamAnswerStatus !== undefined) setTeamAnswerStatus(payload.teamAnswerStatus);
+          }
+        }
+      })
+      .subscribe();
 
     return () => {
-      isActive = false;
+      supabase.removeChannel(channel);
     };
   }, [isAdmin]);
 
@@ -227,7 +237,6 @@ export default function GameBoard() {
       setTimeLeft(20);
       setTeamAnswer("");
       setTeamAnswerStatus("idle");
-      setShowRound2Transition(false);
 
       updateServer({
         activeRow: null,
@@ -238,7 +247,6 @@ export default function GameBoard() {
         timeLeft: 20,
         teamAnswer: "",
         teamAnswerStatus: "idle",
-        showRound2Transition: false,
       });
     }
   };
@@ -294,9 +302,6 @@ export default function GameBoard() {
     if (!isAdmin) return;
     const newRevealed = Array.from(new Set([...revealedRows, id]));
 
-    // Check if we just hit exactly 8 questions across the whole board
-    const justFinishedRound1 = newRevealed.length === 8 && revealedRows.length < 8;
-
     setRevealedRows(newRevealed);
     setTimerActive(false);
     setActiveRow(null);
@@ -307,11 +312,6 @@ export default function GameBoard() {
       timeLeft,
       activeRow: null,
     };
-
-    if (justFinishedRound1) {
-      setShowRound2Transition(true);
-      updates.showRound2Transition = true;
-    }
 
     updateServer(updates);
   };
@@ -1165,108 +1165,6 @@ export default function GameBoard() {
         )}
       </AnimatePresence>
 
-      {/* Round 2 Transition Modal */}
-      <AnimatePresence>
-        {showRound2Transition && (
-          <>
-            <motion.div
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 z-[80] bg-[#0F172A]/40 backdrop-blur-sm"
-              exit={{ opacity: 0 }}
-              initial={{ opacity: 0 }}
-            />
-            <motion.div
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              className="absolute z-[90] w-[95%] max-w-xl bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_30px_70px_-10px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] p-8 md:p-12 border border-[#E2E8F0] flex flex-col items-center text-center overflow-hidden"
-              exit={{ y: 50, opacity: 0, scale: 0.9 }}
-              initial={{ y: 50, opacity: 0, scale: 0.9 }}
-              transition={{ type: "spring", damping: 20, stiffness: 100 }}
-            >
-              {/* Decorative Amber Ring */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-1 bg-gradient-to-r from-transparent via-[#F59E0B] to-transparent" />
-
-              <div className="relative z-10 flex flex-col items-center">
-                <motion.div
-                  animate={{
-                    scale: [1, 1.1, 1],
-                  }}
-                  className="w-20 h-20 md:w-24 md:h-24 mb-6 bg-[#FEF3C7] rounded-full flex items-center justify-center border border-[#FDE68A] shadow-sm"
-                  transition={{
-                    duration: 3,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                >
-                  <Play
-                    className="text-[#D97706] ml-1.5"
-                    fill="currentColor"
-                    size={40}
-                  />
-                </motion.div>
-
-                <h3 className="text-xs md:text-sm font-bold text-[#F59E0B] uppercase tracking-[0.3em] mb-3 flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
-                  Chuyển giai đoạn
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
-                </h3>
-
-                <h2 className="text-4xl md:text-5xl font-serif font-black text-[#1E293B] mb-6 tracking-tight">
-                  Vòng 2 Bắt Đầu
-                </h2>
-
-                <div className="space-y-4 mb-10">
-                  <p className="text-base md:text-lg text-[#475569] leading-relaxed">
-                    Đã hoàn thành 8 câu hỏi đầu tiên.
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-[#F8FAFC] p-4 rounded-2xl border border-[#F1F5F9]">
-                      <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
-                        Thời gian
-                      </p>
-                      <p className="text-2xl font-black text-[#EF4444]">
-                        15 GIÂY
-                      </p>
-                    </div>
-                    <div className="bg-[#F8FAFC] p-4 rounded-2xl border border-[#F1F5F9]">
-                      <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
-                        Điểm số
-                      </p>
-                      <p className="text-2xl font-black text-[#10B981]">
-                        +20 ĐIỂM
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {isAdmin ? (
-                  <Button
-                    className="h-14 md:h-16 px-12 bg-[#2563EB] text-white font-bold text-lg rounded-2xl shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] hover:bg-[#1D4ED8] hover:scale-105 transition-all"
-                    size="lg"
-                    onPress={() => {
-                      setShowRound2Transition(false);
-                      updateServer({ showRound2Transition: false });
-                    }}
-                  >
-                    Tiếp tục trò chơi
-                  </Button>
-                ) : (
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="flex gap-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce [animation-delay:-0.3s]" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce [animation-delay:-0.15s]" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce" />
-                    </div>
-                    <p className="text-[#64748B] text-xs font-bold uppercase tracking-widest">
-                      Đang chờ quản trò tiếp tục
-                    </p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
