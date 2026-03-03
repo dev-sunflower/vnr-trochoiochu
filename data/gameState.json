@@ -4,11 +4,18 @@
     1,
     2,
     3,
-    4
+    4,
+    5,
+    6,
+    7,
+    8
   ],
   "verticalRevealed": false,
-  "timerEndsAt": 1772541726067,
+  "timerEndsAt": 1772543776412,
   "timerStatus": "idle",
   "timerActive": false,
-  "timeLeft": 20
+  "timeLeft": 20,
+  "teamAnswer": "",
+  "teamAnswerStatus": "idle",
+  "showRound2Transition": false
 }

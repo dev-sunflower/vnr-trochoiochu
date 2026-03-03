@@ -32,6 +32,11 @@ export default function GameBoard() {
   const [timeLeft, setTimeLeft] = useState(20);
   const [timerActive, setTimerActive] = useState(false);
   const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null);
+  const [teamAnswer, setTeamAnswer] = useState("");
+  const [teamAnswerStatus, setTeamAnswerStatus] = useState<
+    "idle" | "correct" | "incorrect"
+  >("idle");
+  const [showRound2Transition, setShowRound2Transition] = useState(false);
 
   // Sync to server
   const updateServer = async (updates: any) => {
@@ -47,10 +52,32 @@ export default function GameBoard() {
 
   // Poll state from server if not admin
   useEffect(() => {
-    const fetchState = async () => {
+    let isActive = true;
+
+    const fetchState = async (isPolling: boolean = false) => {
+      if (!isActive) return;
+
       try {
-        const res = await fetch("/api/game");
+        const url = isPolling ? "/api/game?poll=true" : "/api/game";
+        const res = await fetch(url);
+
+        if (!isActive) return;
+
+        if (res.status === 204) {
+          fetchState(true);
+
+          return;
+        }
+
         const data = await res.json();
+
+        if (!isActive) return;
+
+        if (data.timeout) {
+          fetchState(true);
+
+          return;
+        }
 
         if (!isAdmin) {
           if (data.activeRow !== undefined) setActiveRow(data.activeRow);
@@ -62,40 +89,153 @@ export default function GameBoard() {
           if (data.timerEndsAt !== undefined) setTimerEndsAt(data.timerEndsAt);
           if (data.timeLeft !== undefined && !data.timerActive)
             setTimeLeft(data.timeLeft);
+          if (data.teamAnswer !== undefined) setTeamAnswer(data.teamAnswer);
+          if (data.teamAnswerStatus !== undefined)
+            setTeamAnswerStatus(data.teamAnswerStatus);
+          if (data.showRound2Transition !== undefined)
+            setShowRound2Transition(data.showRound2Transition);
         }
-      } catch {}
+
+        fetchState(true);
+      } catch (err) {
+        if (isActive) {
+          setTimeout(() => fetchState(true), 1000);
+        }
+      }
     };
 
-    fetchState();
-    const int = setInterval(fetchState, 1000);
+    fetchState(false);
 
-    return () => clearInterval(int);
+    return () => {
+      isActive = false;
+    };
   }, [isAdmin]);
 
   // Check auth state on mount
   useEffect(() => {
-    const savedAuth = sessionStorage.getItem("game_admin_auth");
+    const token = sessionStorage.getItem("game_admin_auth");
 
-    if (savedAuth === "true") {
-      setIsAdmin(true);
+    if (token && token !== "true") {
+      fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ping", token }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setIsAdmin(true);
+          } else {
+            sessionStorage.removeItem("game_admin_auth");
+            setIsAdmin(false);
+          }
+        })
+        .catch(() => {});
+    } else if (token === "true") {
+      // Clear legacy simple auth
+      sessionStorage.removeItem("game_admin_auth");
     }
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // Ping interval to keep session alive
+  useEffect(() => {
+    let int: NodeJS.Timeout;
+
+    if (isAdmin) {
+      int = setInterval(() => {
+        const token = sessionStorage.getItem("game_admin_auth");
+
+        if (token) {
+          fetch("/api/admin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "ping", token }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (!data.success) {
+                setIsAdmin(false);
+                sessionStorage.removeItem("game_admin_auth");
+                alert(
+                  "Phiên đăng nhập đã hết hạn hoặc có người khác đăng nhập!",
+                );
+                window.location.reload();
+              }
+            })
+            .catch(() => {});
+        }
+      }, 3000);
+    }
+
+    return () => clearInterval(int);
+  }, [isAdmin]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authForm.username === "admin" && authForm.password === "vnr202nhom3") {
-      setIsAdmin(true);
-      setShowAuthModal(false);
-      sessionStorage.setItem("game_admin_auth", "true");
-      setAuthError("");
-    } else {
-      setAuthError("Sai tài khoản hoặc mật khẩu");
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "login",
+          username: authForm.username,
+          password: authForm.password,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setIsAdmin(true);
+        setShowAuthModal(false);
+        sessionStorage.setItem("game_admin_auth", data.token);
+        setAuthError("");
+      } else {
+        setAuthError(data.error);
+      }
+    } catch {
+      setAuthError("Lỗi kết nối máy chủ");
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const token = sessionStorage.getItem("game_admin_auth");
+
+    if (token) {
+      await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "logout", token }),
+      }).catch(() => {});
+    }
     setIsAdmin(false);
     sessionStorage.removeItem("game_admin_auth");
+  };
+
+  const handleResetGame = () => {
+    if (!isAdmin) return;
+    if (confirm("Bạn có chắc chắn muốn làm mới toàn bộ trò chơi?")) {
+      setActiveRow(null);
+      setRevealedRows([]);
+      setVerticalRevealed(false);
+      setTimerActive(false);
+      setTimerEndsAt(null);
+      setTimeLeft(20);
+      setTeamAnswer("");
+      setTeamAnswerStatus("idle");
+      setShowRound2Transition(false);
+
+      updateServer({
+        activeRow: null,
+        revealedRows: [],
+        verticalRevealed: false,
+        timerActive: false,
+        timerEndsAt: null,
+        timeLeft: 20,
+        teamAnswer: "",
+        teamAnswerStatus: "idle",
+        showRound2Transition: false,
+      });
+    }
   };
 
   // Local timer smooth tick
@@ -123,19 +263,25 @@ export default function GameBoard() {
 
   const handleRowClick = (id: number) => {
     if (!isAdmin) return;
-    const duration = id <= 8 ? 20 : 15;
+
+    const isRound1 = revealedRows.length < 8;
+    const duration = isRound1 ? 20 : 15;
     const endsAt = Date.now() + duration * 1000;
 
     setActiveRow(id);
     setTimeLeft(duration);
     setTimerActive(true);
     setTimerEndsAt(endsAt);
+    setTeamAnswer("");
+    setTeamAnswerStatus("idle");
 
     updateServer({
       activeRow: id,
       timerActive: true,
       timerEndsAt: endsAt,
       timeLeft: duration,
+      teamAnswer: "",
+      teamAnswerStatus: "idle",
     });
   };
 
@@ -143,13 +289,23 @@ export default function GameBoard() {
     if (!isAdmin) return;
     const newRevealed = Array.from(new Set([...revealedRows, id]));
 
+    const justFinishedRound1 =
+      newRevealed.length === 8 && revealedRows.length < 8;
+
     setRevealedRows(newRevealed);
     setTimerActive(false);
+    setActiveRow(null);
+
+    if (justFinishedRound1) {
+      setShowRound2Transition(true);
+    }
 
     updateServer({
       revealedRows: newRevealed,
       timerActive: false,
       timeLeft,
+      activeRow: null,
+      ...(justFinishedRound1 ? { showRound2Transition: true } : {}),
     });
   };
 
@@ -198,15 +354,26 @@ export default function GameBoard() {
           Hướng dẫn
         </Button>
         {isAdmin ? (
-          <Button
-            className="font-bold text-[10px] md:text-xs"
-            color="danger"
-            size="sm"
-            variant="flat"
-            onPress={handleLogout}
-          >
-            Thoát Admin
-          </Button>
+          <>
+            <Button
+              className="bg-white border border-red-200 shadow-sm text-red-500 font-bold text-[10px] md:text-xs hover:bg-red-50"
+              size="sm"
+              startContent={<RotateCcw size={14} />}
+              variant="flat"
+              onPress={handleResetGame}
+            >
+              Làm mới Trò chơi
+            </Button>
+            <Button
+              className="font-bold text-[10px] md:text-xs"
+              color="danger"
+              size="sm"
+              variant="flat"
+              onPress={handleLogout}
+            >
+              Thoát Admin
+            </Button>
+          </>
         ) : (
           <Button
             className="bg-white border border-slate-200 shadow-sm text-slate-500 font-bold text-[10px] md:text-xs hover:bg-slate-50"
@@ -224,7 +391,12 @@ export default function GameBoard() {
       <div className="flex flex-col items-center w-full h-full max-h-screen px-4 py-4 md:py-8 z-10">
         {/* Header - Compact */}
         <div className="flex flex-col items-center text-center shrink-0 mb-4 md:mb-6">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-1">
+            <span className="bg-indigo-100 text-indigo-800 text-[10px] md:text-xs font-black px-3 py-1 rounded-full uppercase tracking-widest border border-indigo-200 shadow-sm">
+              Vòng {revealedRows.filter((r) => r <= 15).length >= 8 ? "2" : "1"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 mb-2 mt-1">
             <div className="h-[2px] w-8 bg-[#64748B]" />
             <h2 className="text-[#475569] text-[10px] md:text-xs tracking-[0.4em] font-bold uppercase">
               Từ Khóa Hàng Dọc • 15 Chữ Cái
@@ -264,7 +436,7 @@ export default function GameBoard() {
         </div>
 
         {/* Grid - Highly Compact & Scalable */}
-        <div className="flex-1 flex flex-col justify-center items-center gap-1 w-full max-w-5xl min-h-0 overflow-hidden">
+        <div className="flex-1 flex flex-col justify-center items-center gap-1 w-full max-w-5xl min-h-0">
           {GAME_DATA.map((row) => {
             const startIndex = TARGET_COL - row.targetIndex;
             const isRevealed = revealedRows.includes(row.id);
@@ -423,6 +595,113 @@ export default function GameBoard() {
                     <p className="text-xl md:text-2xl lg:text-3xl font-bold leading-relaxed text-[#1E293B]">
                       {activeQuestion.question}
                     </p>
+
+                    {isAdmin ? (
+                      <div className="mt-6 flex flex-col gap-2">
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            classNames={{
+                              inputWrapper: "bg-white border border-[#CBD5E1]",
+                            }}
+                            placeholder="Nhập câu trả lời của đội..."
+                            size="md"
+                            value={teamAnswer}
+                            onChange={(e) => setTeamAnswer(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const normalizedTeamAnswer = teamAnswer
+                                  .replace(/\s+/g, "")
+                                  .toLowerCase();
+                                const normalizedCorrectAnswer =
+                                  activeQuestion.answer
+                                    .replace(/\s+/g, "")
+                                    .toLowerCase();
+                                const isCorrect =
+                                  normalizedTeamAnswer ===
+                                  normalizedCorrectAnswer;
+                                const status = isCorrect
+                                  ? "correct"
+                                  : "incorrect";
+
+                                setTeamAnswerStatus(status);
+                                updateServer({
+                                  teamAnswer,
+                                  teamAnswerStatus: status,
+                                });
+
+                                if (isCorrect) {
+                                  setTimeout(
+                                    () => revealAnswer(activeQuestion.id),
+                                    1500,
+                                  );
+                                }
+                              }
+                            }}
+                          />
+                          <Button
+                            className="font-bold shrink-0"
+                            color="primary"
+                            onPress={() => {
+                              const normalizedTeamAnswer = teamAnswer
+                                .replace(/\s+/g, "")
+                                .toLowerCase();
+                              const normalizedCorrectAnswer =
+                                activeQuestion.answer
+                                  .replace(/\s+/g, "")
+                                  .toLowerCase();
+                              const isCorrect =
+                                normalizedTeamAnswer ===
+                                normalizedCorrectAnswer;
+                              const status = isCorrect
+                                ? "correct"
+                                : "incorrect";
+
+                              setTeamAnswerStatus(status);
+                              updateServer({
+                                teamAnswer,
+                                teamAnswerStatus: status,
+                              });
+
+                              if (isCorrect) {
+                                setTimeout(
+                                  () => revealAnswer(activeQuestion.id),
+                                  1500,
+                                );
+                              }
+                            }}
+                          >
+                            {" "}
+                            Kiểm tra
+                          </Button>
+                        </div>
+                        {teamAnswerStatus !== "idle" && (
+                          <p
+                            className={`text-sm font-bold ${teamAnswerStatus === "correct" ? "text-green-600" : "text-red-500"}`}
+                          >
+                            {teamAnswerStatus === "correct"
+                              ? "Chính xác!"
+                              : "Chưa chính xác!"}
+                          </p>
+                        )}
+                      </div>
+                    ) : teamAnswerStatus !== "idle" ? (
+                      <div
+                        className={`mt-6 p-4 border rounded-xl ${teamAnswerStatus === "correct" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}
+                      >
+                        <p
+                          className={`text-xs font-bold uppercase tracking-wider mb-1 ${teamAnswerStatus === "correct" ? "text-green-600" : "text-red-500"}`}
+                        >
+                          {teamAnswerStatus === "correct"
+                            ? "Kết quả: CHÍNH XÁC"
+                            : "Kết quả: SAI"}
+                        </p>
+                        <p
+                          className={`text-xl font-bold ${teamAnswerStatus === "correct" ? "text-green-700" : "text-red-600"}`}
+                        >
+                          {teamAnswer}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -808,12 +1087,13 @@ export default function GameBoard() {
 
                 <div>
                   <h3 className="font-bold text-[#3B82F6] mb-2 text-lg">
-                    Vòng 1: Câu 1 đến Câu 8
+                    Vòng 1: 8 câu hỏi đầu tiên
                   </h3>
                   <ul className="list-disc pl-5 space-y-2">
                     <li>
-                      Mỗi nhóm được quyền <strong>tự chọn câu hỏi</strong>, và
-                      sẽ có <strong>20 giây</strong> để suy nghĩ và trả lời.
+                      Mỗi nhóm được quyền <strong>tự chọn câu hỏi</strong> (bất
+                      kỳ câu nào), và sẽ có <strong>20 giây</strong> để suy nghĩ
+                      và trả lời.
                     </li>
                     <li>
                       Trả lời đúng:{" "}
@@ -832,7 +1112,7 @@ export default function GameBoard() {
 
                 <div>
                   <h3 className="font-bold text-[#F59E0B] mb-2 text-lg">
-                    Vòng 2: Câu 9 đến Câu 15
+                    Vòng 2: 7 câu hỏi còn lại
                   </h3>
                   <ul className="list-disc pl-5 space-y-2">
                     <li>
@@ -850,6 +1130,109 @@ export default function GameBoard() {
                     </li>
                   </ul>
                 </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Round 2 Transition Modal */}
+      <AnimatePresence>
+        {showRound2Transition && (
+          <>
+            <motion.div
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 z-[80] bg-[#0F172A]/40 backdrop-blur-sm"
+              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }}
+            />
+            <motion.div
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              className="absolute z-[90] w-[95%] max-w-xl bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_30px_70px_-10px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] p-8 md:p-12 border border-[#E2E8F0] flex flex-col items-center text-center overflow-hidden"
+              exit={{ y: 50, opacity: 0, scale: 0.9 }}
+              initial={{ y: 50, opacity: 0, scale: 0.9 }}
+              transition={{ type: "spring", damping: 20, stiffness: 100 }}
+            >
+              {/* Decorative Amber Ring */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-1 bg-gradient-to-r from-transparent via-[#F59E0B] to-transparent" />
+
+              <div className="relative z-10 flex flex-col items-center">
+                <motion.div
+                  animate={{
+                    scale: [1, 1.1, 1],
+                  }}
+                  className="w-20 h-20 md:w-24 md:h-24 mb-6 bg-[#FEF3C7] rounded-full flex items-center justify-center border border-[#FDE68A] shadow-sm"
+                  transition={{
+                    duration: 3,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                >
+                  <Play
+                    className="text-[#D97706] ml-1.5"
+                    fill="currentColor"
+                    size={40}
+                  />
+                </motion.div>
+
+                <h3 className="text-xs md:text-sm font-bold text-[#F59E0B] uppercase tracking-[0.3em] mb-3 flex items-center gap-3">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
+                  Chuyển giai đoạn
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
+                </h3>
+
+                <h2 className="text-4xl md:text-5xl font-serif font-black text-[#1E293B] mb-6 tracking-tight">
+                  Vòng 2 Bắt Đầu
+                </h2>
+
+                <div className="space-y-4 mb-10">
+                  <p className="text-base md:text-lg text-[#475569] leading-relaxed">
+                    Đã hoàn thành 8 câu hỏi đầu tiên.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-[#F8FAFC] p-4 rounded-2xl border border-[#F1F5F9]">
+                      <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
+                        Thời gian
+                      </p>
+                      <p className="text-2xl font-black text-[#EF4444]">
+                        15 GIÂY
+                      </p>
+                    </div>
+                    <div className="bg-[#F8FAFC] p-4 rounded-2xl border border-[#F1F5F9]">
+                      <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
+                        Điểm số
+                      </p>
+                      <p className="text-2xl font-black text-[#10B981]">
+                        +20 ĐIỂM
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {isAdmin ? (
+                  <Button
+                    className="h-14 md:h-16 px-12 bg-[#2563EB] text-white font-bold text-lg rounded-2xl shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] hover:bg-[#1D4ED8] hover:scale-105 transition-all"
+                    size="lg"
+                    onPress={() => {
+                      setShowRound2Transition(false);
+                      updateServer({ showRound2Transition: false });
+                    }}
+                  >
+                    Tiếp tục trò chơi
+                  </Button>
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-bounce" />
+                    </div>
+                    <p className="text-[#64748B] text-xs font-bold uppercase tracking-widest">
+                      Đang chờ quản trò tiếp tục
+                    </p>
+                  </div>
+                )}
               </div>
             </motion.div>
           </>
