@@ -301,24 +301,26 @@ export default function GameBoard() {
     if (!isAdmin) return;
     const newRevealed = Array.from(new Set([...revealedRows, id]));
 
-    const justFinishedRound1 =
-      newRevealed.length === 8 && revealedRows.length < 8;
+    // Check if we just hit exactly 8 questions across the whole board
+    const justFinishedRound1 = newRevealed.length === 8 && revealedRows.length < 8;
 
     setRevealedRows(newRevealed);
     setTimerActive(false);
     setActiveRow(null);
 
-    if (justFinishedRound1) {
-      setShowRound2Transition(true);
-    }
-
-    updateServer({
+    const updates: any = {
       revealedRows: newRevealed,
       timerActive: false,
       timeLeft,
       activeRow: null,
-      ...(justFinishedRound1 ? { showRound2Transition: true } : {}),
-    });
+    };
+
+    if (justFinishedRound1) {
+      setShowRound2Transition(true);
+      updates.showRound2Transition = true;
+    }
+
+    updateServer(updates);
   };
 
   const toggleVertical = () => {
