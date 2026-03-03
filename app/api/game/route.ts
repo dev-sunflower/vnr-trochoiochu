@@ -25,6 +25,9 @@ const globalForGame = global as unknown as { gameState: any };
 
 if (!globalForGame.gameState) {
   const persisted = readState();
+  const defaultRowOrder = Array.from({ length: 15 }, (_, i) => i + 1);
+  const shuffledOrder = [...defaultRowOrder].sort(() => Math.random() - 0.5);
+
   globalForGame.gameState = persisted || {
     activeRow: null,
     revealedRows: [],
@@ -35,6 +38,9 @@ if (!globalForGame.gameState) {
     teamAnswer: "",
     teamAnswerStatus: "idle",
     showRound2Transition: false,
+    rowOrder: shuffledOrder,
+    verticalGuess: "",
+    isVerticalGuessed: false,
     version: Date.now(),
   };
 }
