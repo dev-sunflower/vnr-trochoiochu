@@ -302,6 +302,17 @@ export default function GameBoard() {
         >
           Hướng dẫn
         </Button>
+        {!isAdmin && (
+          <Button
+            className="bg-white border border-blue-200 shadow-sm text-blue-500 font-bold text-[10px] md:text-xs hover:bg-blue-50"
+            size="sm"
+            startContent={<RotateCcw size={14} />}
+            variant="flat"
+            onPress={() => window.location.reload()}
+          >
+            Đồng bộ hoá
+          </Button>
+        )}
         {isAdmin ? (
           <>
             <Button
@@ -586,6 +597,15 @@ export default function GameBoard() {
                             Kiểm tra
                           </Button>
                         </div>
+                        {teamAnswerStatus !== "idle" && (
+                          <p
+                            className={`text-sm font-bold ${teamAnswerStatus === "correct" ? "text-green-600" : "text-red-500"}`}
+                          >
+                            {teamAnswerStatus === "correct"
+                              ? "Chính xác!"
+                              : "Chưa chính xác!"}
+                          </p>
+                        )}
                       </div>
                     ) : teamAnswerStatus !== "idle" ? (
                       <div
