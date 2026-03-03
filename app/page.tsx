@@ -38,15 +38,19 @@ export default function GameBoard() {
   >("idle");
   const [showRound2Transition, setShowRound2Transition] = useState(false);
   const [userDismissedRow, setUserDismissedRow] = useState<number | null>(null);
+  const [localVersion, setLocalVersion] = useState(0);
 
   // Sync to server
   const updateServer = async (updates: any) => {
     if (!isAdmin) return;
+    const now = Date.now();
+
+    setLocalVersion(now);
     try {
       await fetch("/api/game", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, version: now }),
       });
     } catch {}
   };
@@ -55,6 +59,7 @@ export default function GameBoard() {
   useEffect(() => {
     let isActive = true;
     let failCount = 0;
+    let lastSeenVersion = 0;
 
     const fetchState = async (isPolling: boolean = false) => {
       if (!isActive) return;
@@ -79,8 +84,14 @@ export default function GameBoard() {
         if (!isActive) return;
 
         // Handle game state update
+        // Only update if server has a NEWER version than what we've seen
         if (data && !data.timeout && !isAdmin) {
-          if (data.activeRow !== undefined) {
+          const serverVersion = data.version || 0;
+
+          if (serverVersion > lastSeenVersion) {
+            lastSeenVersion = serverVersion;
+
+            if (data.activeRow !== undefined) {
             setActiveRow((prev) => {
               if (data.activeRow !== prev) {
                 setUserDismissedRow(null);
@@ -102,6 +113,7 @@ export default function GameBoard() {
             setTeamAnswerStatus(data.teamAnswerStatus);
           if (data.showRound2Transition !== undefined)
             setShowRound2Transition(data.showRound2Transition);
+          }
         }
 
         // Keep polling
