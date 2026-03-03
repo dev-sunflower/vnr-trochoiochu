@@ -31,6 +31,46 @@ export default function GameBoard() {
 
   const [timeLeft, setTimeLeft] = useState(20);
   const [timerActive, setTimerActive] = useState(false);
+  const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null);
+
+  // Sync to server
+  const updateServer = async (updates: any) => {
+    if (!isAdmin) return;
+    try {
+      await fetch("/api/game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+    } catch {}
+  };
+
+  // Poll state from server if not admin
+  useEffect(() => {
+    const fetchState = async () => {
+      try {
+        const res = await fetch("/api/game");
+        const data = await res.json();
+
+        if (!isAdmin) {
+          if (data.activeRow !== undefined) setActiveRow(data.activeRow);
+          if (data.revealedRows !== undefined)
+            setRevealedRows(data.revealedRows);
+          if (data.verticalRevealed !== undefined)
+            setVerticalRevealed(data.verticalRevealed);
+          if (data.timerActive !== undefined) setTimerActive(data.timerActive);
+          if (data.timerEndsAt !== undefined) setTimerEndsAt(data.timerEndsAt);
+          if (data.timeLeft !== undefined && !data.timerActive)
+            setTimeLeft(data.timeLeft);
+        }
+      } catch {}
+    };
+
+    fetchState();
+    const int = setInterval(fetchState, 1000);
+
+    return () => clearInterval(int);
+  }, [isAdmin]);
 
   // Check auth state on mount
   useEffect(() => {
@@ -58,36 +98,67 @@ export default function GameBoard() {
     sessionStorage.removeItem("game_admin_auth");
   };
 
+  // Local timer smooth tick
   useEffect(() => {
     let int: NodeJS.Timeout;
 
-    if (timerActive && timeLeft > 0) {
+    if (timerActive && timerEndsAt) {
       int = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0) {
-      setTimerActive(false);
+        const remaining = Math.max(
+          0,
+          Math.ceil((timerEndsAt - Date.now()) / 1000),
+        );
+
+        setTimeLeft(remaining);
+
+        if (remaining === 0) {
+          setTimerActive(false);
+          if (isAdmin) updateServer({ timerActive: false, timeLeft: 0 });
+        }
+      }, 100);
     }
 
     return () => clearInterval(int);
-  }, [timerActive, timeLeft]);
+  }, [timerActive, timerEndsAt, isAdmin]);
 
   const handleRowClick = (id: number) => {
     if (!isAdmin) return;
+    const duration = id <= 8 ? 20 : 15;
+    const endsAt = Date.now() + duration * 1000;
+
     setActiveRow(id);
-    setTimeLeft(id <= 8 ? 20 : 15);
+    setTimeLeft(duration);
     setTimerActive(true);
+    setTimerEndsAt(endsAt);
+
+    updateServer({
+      activeRow: id,
+      timerActive: true,
+      timerEndsAt: endsAt,
+      timeLeft: duration,
+    });
   };
 
   const revealAnswer = (id: number) => {
     if (!isAdmin) return;
-    setRevealedRows((prev) => Array.from(new Set([...prev, id])));
+    const newRevealed = Array.from(new Set([...revealedRows, id]));
+
+    setRevealedRows(newRevealed);
     setTimerActive(false);
+
+    updateServer({
+      revealedRows: newRevealed,
+      timerActive: false,
+      timeLeft,
+    });
   };
 
   const toggleVertical = () => {
     if (!isAdmin) return;
-    setVerticalRevealed(!verticalRevealed);
+    const newVal = !verticalRevealed;
+
+    setVerticalRevealed(newVal);
+    updateServer({ verticalRevealed: newVal });
   };
 
   const TARGET_COL = 10;
@@ -312,7 +383,11 @@ export default function GameBoard() {
               exit={{ opacity: 0 }}
               initial={{ opacity: 0 }}
               onClick={() => {
-                if (isAdmin) setActiveRow(null);
+                if (isAdmin) {
+                  setActiveRow(null);
+                  setTimerActive(false);
+                  updateServer({ activeRow: null, timerActive: false });
+                }
               }}
             />
 
@@ -417,10 +492,23 @@ export default function GameBoard() {
                           onPress={() => {
                             if (timerActive) {
                               setTimerActive(false);
+                              updateServer({ timerActive: false, timeLeft });
                             } else {
-                              if (timeLeft === 0)
-                                setTimeLeft(activeQuestion.id <= 8 ? 20 : 15);
+                              let duration = timeLeft;
+
+                              if (timeLeft === 0) {
+                                duration = activeQuestion.id <= 8 ? 20 : 15;
+                                setTimeLeft(duration);
+                              }
+                              const endsAt = Date.now() + duration * 1000;
+
                               setTimerActive(true);
+                              setTimerEndsAt(endsAt);
+                              updateServer({
+                                timerActive: true,
+                                timerEndsAt: endsAt,
+                                timeLeft: duration,
+                              });
                             }
                           }}
                         >
@@ -444,7 +532,14 @@ export default function GameBoard() {
                           isIconOnly
                           className="w-10 h-10 md:w-12 md:h-12 bg-white border border-[#CBD5E1] text-[#64748B] rounded-xl hover:bg-[#FEE2E2] hover:text-[#EF4444] hover:border-[#FCA5A5] transition-all shadow-sm"
                           variant="flat"
-                          onPress={() => setActiveRow(null)}
+                          onPress={() => {
+                            setActiveRow(null);
+                            setTimerActive(false);
+                            updateServer({
+                              activeRow: null,
+                              timerActive: false,
+                            });
+                          }}
                         >
                           <X size={18} strokeWidth={3} />
                         </Button>
@@ -599,12 +694,13 @@ export default function GameBoard() {
                       và 1 hàng dọc.
                     </li>
                     <li>
-                      Người chơi không thể tự tương tác với ô chữ. Tất cả thao
-                      tác sẽ do Quản trò điều khiển.
+                      Người chơi không thể tự tương tác với ô chữ. Màn hình của
+                      bạn sẽ <strong>tự động đồng bộ hóa</strong> với mọi thao
+                      tác của Quản trò theo thời gian thực.
                     </li>
                     <li>
                       Khi Quản trò chọn một câu hỏi, câu hỏi và đồng hồ đếm
-                      ngược 20 giây sẽ xuất hiện giữa màn hình.
+                      ngược sẽ tự động xuất hiện trên màn hình của bạn.
                     </li>
                   </ul>
                 </div>
@@ -716,8 +812,8 @@ export default function GameBoard() {
                   </h3>
                   <ul className="list-disc pl-5 space-y-2">
                     <li>
-                      Mỗi nhóm sẽ có <strong>20 giây</strong> để suy nghĩ và trả
-                      lời.
+                      Mỗi nhóm được quyền <strong>tự chọn câu hỏi</strong>, và
+                      sẽ có <strong>20 giây</strong> để suy nghĩ và trả lời.
                     </li>
                     <li>
                       Trả lời đúng:{" "}

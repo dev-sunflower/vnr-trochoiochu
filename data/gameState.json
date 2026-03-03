@@ -1,7 +1,14 @@
 {
-  "activeRow": 1,
-  "revealedRows": [],
+  "activeRow": null,
+  "revealedRows": [
+    1,
+    2,
+    3,
+    4
+  ],
   "verticalRevealed": false,
-  "timerEndsAt": null,
-  "timerStatus": "idle"
+  "timerEndsAt": 1772541726067,
+  "timerStatus": "idle",
+  "timerActive": false,
+  "timeLeft": 20
 }
