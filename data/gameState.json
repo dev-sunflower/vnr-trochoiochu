@@ -1,21 +1,12 @@
 {
   "activeRow": null,
-  "revealedRows": [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8
-  ],
+  "revealedRows": [],
   "verticalRevealed": false,
-  "timerEndsAt": 1772543852027,
+  "timerEndsAt": 1772544341973,
   "timerStatus": "idle",
   "timerActive": false,
-  "timeLeft": 15,
-  "teamAnswer": "",
-  "teamAnswerStatus": "idle",
+  "timeLeft": 20,
+  "teamAnswer": "asdf",
+  "teamAnswerStatus": "incorrect",
   "showRound2Transition": false
 }
