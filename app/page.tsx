@@ -53,6 +53,7 @@ export default function GameBoard() {
   // Poll state from server if not admin
   useEffect(() => {
     let isActive = true;
+    let failCount = 0;
 
     const fetchState = async (isPolling: boolean = false) => {
       if (!isActive) return;
@@ -63,9 +64,12 @@ export default function GameBoard() {
 
         if (!isActive) return;
 
-        if (res.status === 204) {
-          fetchState(true);
+        // Reset fail count on success
+        failCount = 0;
 
+        if (res.status === 204) {
+          // Empty or abort
+          fetchState(true);
           return;
         }
 
@@ -73,13 +77,8 @@ export default function GameBoard() {
 
         if (!isActive) return;
 
-        if (data.timeout) {
-          fetchState(true);
-
-          return;
-        }
-
-        if (!isAdmin) {
+        // Handle game state update
+        if (data && !data.timeout && !isAdmin) {
           if (data.activeRow !== undefined) setActiveRow(data.activeRow);
           if (data.revealedRows !== undefined)
             setRevealedRows(data.revealedRows);
@@ -96,10 +95,14 @@ export default function GameBoard() {
             setShowRound2Transition(data.showRound2Transition);
         }
 
+        // Keep polling
         fetchState(true);
       } catch (_err) {
         if (isActive) {
-          setTimeout(() => fetchState(true), 1000);
+          failCount++;
+          // Wait longer between retries if failing repeatedly
+          const retryDelay = Math.min(1000 * failCount, 5000);
+          setTimeout(() => fetchState(true), retryDelay);
         }
       }
     };
