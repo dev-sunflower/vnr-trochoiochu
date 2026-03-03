@@ -17,7 +17,7 @@ function readState() {
       return JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
     }
   } catch (err) {
-    console.error("Error reading state file:", err);
+    // console.error("Error reading state file:", err);
   }
   return null;
 }
@@ -26,7 +26,7 @@ function writeState(state: any) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
   } catch (err) {
-    console.error("Error writing state file:", err);
+    // console.error("Error writing state file:", err);
   }
 }
 

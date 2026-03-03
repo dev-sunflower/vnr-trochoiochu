@@ -38,14 +38,12 @@ export default function GameBoard() {
   >("idle");
   const [showRound2Transition, setShowRound2Transition] = useState(false);
   const [userDismissedRow, setUserDismissedRow] = useState<number | null>(null);
-  const [localVersion, setLocalVersion] = useState(0);
 
   // Sync to server
   const updateServer = async (updates: any) => {
     if (!isAdmin) return;
     const now = Date.now();
 
-    setLocalVersion(now);
     try {
       await fetch("/api/game", {
         method: "POST",
