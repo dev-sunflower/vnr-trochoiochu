@@ -40,12 +40,12 @@ function saveState(state: any) {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+export async function GET(req: Request): Promise<NextResponse | Response> {
   const url = new URL(req.url);
   const isPolling = url.searchParams.get("poll") === "true";
 
   if (isPolling) {
-    return new Promise((resolve) => {
+    return new Promise<NextResponse | Response>((resolve) => {
       // Send current state if something is immediately needed?
       // Actually long polling wait for changes. But if we want initial, client should do normal GET first, then poll.
       // Wait, client logic can just ask for long poll, but if we don't return immediately, it won't get initial state until an update.

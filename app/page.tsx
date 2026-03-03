@@ -97,7 +97,7 @@ export default function GameBoard() {
         }
 
         fetchState(true);
-      } catch (err) {
+      } catch (_err) {
         if (isActive) {
           setTimeout(() => fetchState(true), 1000);
         }
