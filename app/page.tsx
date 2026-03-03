@@ -89,28 +89,11 @@ export default function GameBoard() {
           if (serverVersion > lastSeenVersion) {
             lastSeenVersion = serverVersion;
 
-            if (data.activeRow !== undefined) {
-            setActiveRow((prev) => {
-              if (data.activeRow !== prev) {
-                setUserDismissedRow(null);
-              }
-
-              return data.activeRow;
-            });
-          }
-          if (data.revealedRows !== undefined)
-            setRevealedRows(data.revealedRows);
-          if (data.verticalRevealed !== undefined)
-            setVerticalRevealed(data.verticalRevealed);
-          if (data.timerActive !== undefined) setTimerActive(data.timerActive);
-          if (data.timerEndsAt !== undefined) setTimerEndsAt(data.timerEndsAt);
-          if (data.timeLeft !== undefined && !data.timerActive)
-            setTimeLeft(data.timeLeft);
-          if (data.teamAnswer !== undefined) setTeamAnswer(data.teamAnswer);
-          if (data.teamAnswerStatus !== undefined)
-            setTeamAnswerStatus(data.teamAnswerStatus);
-          if (data.showRound2Transition !== undefined)
-            setShowRound2Transition(data.showRound2Transition);
+            // ONLY sync the crossword grid state (revealed rows and vertical word)
+            if (data.revealedRows !== undefined)
+              setRevealedRows(data.revealedRows);
+            if (data.verticalRevealed !== undefined)
+              setVerticalRevealed(data.verticalRevealed);
           }
         }
 
