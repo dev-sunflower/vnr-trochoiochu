@@ -37,6 +37,7 @@ export default function GameBoard() {
     "idle" | "correct" | "incorrect"
   >("idle");
   const [showRound2Transition, setShowRound2Transition] = useState(false);
+  const [userDismissedRow, setUserDismissedRow] = useState<number | null>(null);
 
   // Sync to server
   const updateServer = async (updates: any) => {
@@ -79,7 +80,15 @@ export default function GameBoard() {
 
         // Handle game state update
         if (data && !data.timeout && !isAdmin) {
-          if (data.activeRow !== undefined) setActiveRow(data.activeRow);
+          if (data.activeRow !== undefined) {
+            setActiveRow((prev) => {
+              if (data.activeRow !== prev) {
+                setUserDismissedRow(null);
+              }
+
+              return data.activeRow;
+            });
+          }
           if (data.revealedRows !== undefined)
             setRevealedRows(data.revealedRows);
           if (data.verticalRevealed !== undefined)
@@ -356,6 +365,17 @@ export default function GameBoard() {
         >
           Hướng dẫn
         </Button>
+        {!isAdmin && (
+          <Button
+            className="bg-white border border-blue-200 shadow-sm text-blue-500 font-bold text-[10px] md:text-xs hover:bg-blue-50"
+            size="sm"
+            startContent={<RotateCcw size={14} />}
+            variant="flat"
+            onPress={() => window.location.reload()}
+          >
+            Đồng bộ lại
+          </Button>
+        )}
         {isAdmin ? (
           <>
             <Button
@@ -549,7 +569,7 @@ export default function GameBoard() {
 
       {/* Overlay Question Card */}
       <AnimatePresence>
-        {activeQuestion && (
+        {activeQuestion && userDismissedRow !== activeQuestion.id && (
           <>
             {/* Backdrop blur overlay */}
             <motion.div
@@ -562,6 +582,8 @@ export default function GameBoard() {
                   setActiveRow(null);
                   setTimerActive(false);
                   updateServer({ activeRow: null, timerActive: false });
+                } else {
+                  setUserDismissedRow(activeQuestion.id);
                 }
               }}
             />
@@ -828,10 +850,19 @@ export default function GameBoard() {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center w-full">
-                      <p className="text-[#64748B] text-xs font-medium uppercase tracking-widest mt-4">
+                    <div className="text-center w-full flex flex-col gap-3">
+                      <p className="text-[#64748B] text-[10px] font-bold uppercase tracking-[0.2em] mt-4">
                         Quản trò đang điều khiển
                       </p>
+                      <Button
+                        className="bg-white border border-[#CBD5E1] text-[#64748B] font-bold text-xs h-10 rounded-xl hover:bg-[#F1F5F9] transition-all shadow-sm"
+                        size="sm"
+                        startContent={<X size={14} />}
+                        variant="flat"
+                        onPress={() => setUserDismissedRow(activeQuestion.id)}
+                      >
+                        Đóng tạm thời
+                      </Button>
                     </div>
                   )}
                 </div>

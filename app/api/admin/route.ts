@@ -43,15 +43,24 @@ export async function POST(req: Request) {
   }
 
   if (body.action === "ping") {
-    if (body.token === globalForAdmin.activeAdminToken) {
-      globalForAdmin.lastPingTime = Date.now();
+    const now = Date.now();
+    
+    // If server state is empty OR the previous admin has timed out,
+    // let this token take over the session.
+    if (!globalForAdmin.activeAdminToken || now - globalForAdmin.lastPingTime > 10000) {
+      globalForAdmin.activeAdminToken = body.token;
+      globalForAdmin.lastPingTime = now;
+      return NextResponse.json({ success: true });
+    }
 
+    if (body.token === globalForAdmin.activeAdminToken) {
+      globalForAdmin.lastPingTime = now;
       return NextResponse.json({ success: true });
     }
 
     return NextResponse.json({
       success: false,
-      error: "Phiên đăng nhập không hợp lệ",
+      error: "Phiên đăng nhập không hợp lệ hoặc đã có Quản trò khác.",
     });
   }
 
